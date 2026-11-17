@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Space Invaders</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: #171717;
+    }
+
+    canvas {
+      display: block;
+      width: min(800px, 100vw);
+      height: auto;
+      background: #000000;
+    }
+
+    .audio-status {
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      left: 1rem;
+      margin: 0;
+      color: #ffffff;
+      font: 14px/1.4 system-ui, sans-serif;
+      text-align: center;
+    }
+
+    .audio-status button {
+      margin-left: 0.5rem;
+    }
+
+    .game-over-link {
+      position: fixed;
+      top: calc(50% + 3rem);
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1;
+      padding: 0.65rem 1rem;
+      border: 1px solid #ffffff;
+      border-radius: 0.25rem;
+      background: #171717;
+      color: #ffffff;
+      font: 16px system-ui, sans-serif;
+      text-decoration: none;
+    }
+
+    .game-over-link:hover,
+    .game-over-link:focus-visible {
+      background: #303030;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <canvas id="game" width="800" height="600" aria-label="Space Invaders game. Use the left and right arrow keys to move and hold Space to fire.">
+      Your browser does not support the HTML canvas element.
+    </canvas>
+    <div id="audioStatus" class="audio-status" role="status" hidden>
+      <span></span>
+      <button id="retryAudio" type="button" hidden>Retry Boss Music</button>
+    </div>
+    <a
+      id="gameOverVideoLink"
+      class="game-over-link"
+      href="https://youtu.be/dQw4w9WgXcQ"
+      target="_blank"
+      rel="noopener noreferrer"
+      hidden
+    >Open game-over video</a>
+  </main>
+
+  <audio
+    id="bossMusic"
+    src="https://dn720302.ca.archive.org/0/items/07-one-last-trial/crosscode_ost_mp3/Deniz%20Akbulut%20-%20CrossCode%20%28Original%20Game%20Soundtrack%29/Deniz%20Akbulut%20-%20CrossCode%20%28Original%20Game%20Soundtrack%29%20-%2059%20Shizuka.mp3"
+    preload="none"
+    loop
+  ></audio>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const context = canvas.getContext("2d");
+    const audioStatus = document.getElementById("audioStatus");
+    const retryAudio = document.getElementById("retryAudio");
+    const bossMusic = document.getElementById("bossMusic");
+    const gameOverVideoLink = document.getElementById("gameOverVideoLink");
+    const gameOverVideoUrl = "https://youtu.be/dQw4w9WgXcQ";
+
+    const bunkerMask = [
+      "000001111110000000",
+      "000111111111000000",
+      "001111111111110000",
+      "011111111111111000",
+      "111111111111111111",
+      "111111111111111111",
+      "111111111111111111",
+      "111111000011111111",
+      "111110000001111111",
+      "111110000001111111"
+    ];
+
+    const spriteTypes = {
+      squid: {
+        color: "#00e5ff",
+        score: 30,
+        frames: [
+          [
+            "00000100000",
+            "00001110000",
+            "00011111000",
+            "00110101100",
+            "01111111110",
+            "01011111010",
+            "00011011000",
+            "00110001100"
+          ],
+          [
+            "00000100000",
+            "00001110000",
+            "00011111000",
+            "00110101100",
+            "01111111110",
+            "01011111010",
+            "00110001100",
+            "00011011000"
+          ]
+        ]
+      },
+      crab: {
+        color: "#ff35c5",
+        score: 20,
+        frames: [
+          [
+            "00001110000",
+            "00111111100",
+            "01101110110",
+            "11111111111",
+            "11011111011",
+            "10010001001",
+            "00100100100",
+            "01000000010"
+          ],
+          [
+            "00001110000",
+            "00111111100",
+            "01101110110",
+            "11111111111",
+            "11011111011",
+            "00100100100",
+            "01000000010",
+            "10000000001"
+          ]
+        ]
+      },
+      octopus: {
+        color: "#ffe600",
+        score: 10,
+        frames: [
+          [
+            "00011111000",
+            "01111111110",
+            "11101110111",
+            "11111111111",
+            "00111011100",
+            "01100100110",
+            "11000000011",
+            "10000000001"
+          ],
+          [
+            "00011111000",
+            "01111111110",
+            "11101110111",
+            "11111111111",
+            "00111011100",
+            "00100100100",
+            "01100000110",
+            "11000000011"
+          ]
+        ]
+      }
+    };
+
+    const player = {
+      x: (canvas.width - 42) / 2,
+      y: canvas.height - 54,
+      width: 42,
+      height: 28,
+      speed: 360,
+      fireCooldown: 0,
+      invulnerableUntil: 0
+    };
+
+    const keys = {
+      left: false,
+      right: false,
+      fire: false
+    };
+
+    const formation = {
+      offsetX: 0,
+      offsetY: 0,
+      direction: 1,
+      speed: 42,
+      dropDistance: 18,
+      startX: 95,
+      startY: 82,
+      spacingX: 58,
+      spacingY: 46,
+      spritePixelSize: 3
+    };
+
+    const invaders = [];
+    for (let row = 0; row < 5; row += 1) {
+      for (let column = 0; column < 11; column += 1) {
+        const type = row === 0 ? "squid" : row <= 2 ? "crab" : "octopus";
+        invaders.push({
+          row,
+          column,
+          baseX: formation.startX + column * formation.spacingX,
+          baseY: formation.startY + row * formation.spacingY,
+          width: 33,
+          height: 24,
+          type,
+          alive: true
+        });
+      }
+    }
+
+    const bunkerCellSize = 4;
+    const bunkers = [70, 270, 470, 670].map((x) => ({
+      x,
+      y: 420,
+      cellSize: bunkerCellSize,
+      cells: bunkerMask.map((row) => Array.from(row, (cell) => cell === "1"))
+    }));
+
+    const playerBullets = [];
+    const enemyBullets = [];
+
+    const game = {
+      score: 0,
+      lives: 3,
+      destroyedInvaders: 0,
+      bossTriggerKills: 5,
+      time: 0,
+      enemyFireCooldown: 1.5,
+      bossBattle: false,
+      bossAlertUntil: 0,
+      gameOver: false,
+      victory: false
+    };
+
+    function livingInvaders() {
+      return invaders.filter((invader) => invader.alive);
+    }
+
+    let audioContext = null;
+    let masterGain = null;
+    let noiseBuffer = null;
+    let soundErrorReported = false;
+
+    function reportSoundError(error) {
+      if (soundErrorReported) {
+        return;
+      }
+
+      soundErrorReported = true;
+      console.error("Web Audio sound effects could not be played.", error);
+      audioStatus.querySelector("span").textContent =
+        "Sound effects are unavailable in this browser.";
+      audioStatus.hidden = false;
+    }
+
+    function getAudioContext() {
+      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextConstructor) {
+        reportSoundError(new Error("Web Audio API is not supported."));
+        return null;
+      }
+
+      if (!audioContext) {
+        try {
+          audioContext = new AudioContextConstructor();
+          masterGain = audioContext.createGain();
+          masterGain.gain.value = 0.28;
+          masterGain.connect(audioContext.destination);
+
+          noiseBuffer = audioContext.createBuffer(
+            1,
+            Math.floor(audioContext.sampleRate * 0.75),
+            audioContext.sampleRate
+          );
+          const noiseSamples = noiseBuffer.getChannelData(0);
+          for (let sample = 0; sample < noiseSamples.length; sample += 1) {
+            noiseSamples[sample] = Math.random() * 2 - 1;
+          }
+        } catch (error) {
+          audioContext = null;
+          reportSoundError(error);
+          return null;
+        }
+      }
+
+      if (audioContext.state === "suspended") {
+        audioContext.resume().catch(reportSoundError);
+      }
+      return audioContext;
+    }
+
+    function playTone(audio, type, startFrequency, endFrequency, startTime, duration, volume) {
+      const oscillator = audio.createOscillator();
+      const gain = audio.createGain();
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(startFrequency, startTime);
+      oscillator.frequency.exponentialRampToValueAtTime(
+        Math.max(1, endFrequency),
+        startTime + duration
+      );
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(volume, startTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      oscillator.connect(gain);
+      gain.connect(masterGain);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + duration + 0.01);
+    }
+
+    function playNoise(audio, startTime, duration, volume, startFrequency, endFrequency) {
+      const source = audio.createBufferSource();
+      const filter = audio.createBiquadFilter();
+      const gain = audio.createGain();
+      source.buffer = noiseBuffer;
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(startFrequency, startTime);
+      filter.frequency.exponentialRampToValueAtTime(endFrequency, startTime + duration);
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(volume, startTime + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+      source.start(startTime);
+      source.stop(startTime + duration + 0.01);
+    }
+
+    function playLaserSound() {
+      const audio = getAudioContext();
+      if (!audio) {
+        return;
+      }
+      playTone(audio, "square", 1050, 260, audio.currentTime, 0.12, 0.16);
+    }
+
+    function playEnemyShotSound() {
+      const audio = getAudioContext();
+      if (!audio) {
+        return;
+      }
+      playTone(audio, "sawtooth", 460, 110, audio.currentTime, 0.16, 0.07);
+    }
+
+    function playExplosionSound() {
+      const audio = getAudioContext();
+      if (!audio) {
+        return;
+      }
+
+      const startTime = audio.currentTime;
+      playTone(audio, "sine", 170, 36, startTime, 0.48, 0.3);
+      playTone(audio, "triangle", 760, 105, startTime + 0.012, 0.34, 0.1);
+      playTone(audio, "square", 330, 58, startTime + 0.025, 0.26, 0.055);
+      playNoise(audio, startTime, 0.42, 0.24, 7200, 240);
+    }
+
+    function playImpactSound() {
+      const audio = getAudioContext();
+      if (!audio) {
+        return;
+      }
+
+      const startTime = audio.currentTime;
+      playTone(audio, "triangle", 280, 90, startTime, 0.08, 0.1);
+      playNoise(audio, startTime, 0.09, 0.1, 2600, 420);
+    }
+
+    function playGameOverSound() {
+      const audio = getAudioContext();
+      if (!audio) {
+        return;
+      }
+
+      const startTime = audio.currentTime;
+      playTone(audio, "square", 520, 390, startTime, 0.18, 0.12);
+      playTone(audio, "square", 390, 260, startTime + 0.2, 0.18, 0.12);
+      playTone(audio, "triangle", 260, 70, startTime + 0.42, 0.62, 0.18);
+      playNoise(audio, startTime + 0.42, 0.55, 0.15, 3200, 180);
+    }
+
+    function reportAudioError(error) {
+      console.error("Boss music could not be played.", error);
+      audioStatus.querySelector("span").textContent =
+        "Boss music could not be played. Check your connection or audio permissions.";
+      audioStatus.hidden = false;
+      retryAudio.hidden = false;
+    }
+
+    function playBossMusic() {
+      if (!game.bossBattle || game.gameOver || game.victory) {
+        return;
+      }
+
+      bossMusic.play().then(() => {
+        audioStatus.hidden = true;
+        retryAudio.hidden = true;
+      }).catch(reportAudioError);
+    }
+
+    bossMusic.addEventListener("error", () => {
+      reportAudioError(new Error("The audio file could not be loaded."));
+    });
+
+    retryAudio.addEventListener("click", playBossMusic);
+
+    function startBossBattle() {
+      if (game.bossBattle) {
+        return;
+      }
+
+      game.bossBattle = true;
+      game.bossAlertUntil = game.time + 5;
+      game.enemyFireCooldown = Math.min(game.enemyFireCooldown, 0.3);
+      playBossMusic();
+    }
+
+    function endGame(won) {
+      if (game.gameOver || game.victory) {
+        return;
+      }
+
+      game.gameOver = !won;
+      game.victory = won;
+      bossMusic.pause();
+      if (!won) {
+        playGameOverSound();
+        gameOverVideoLink.hidden = false;
+        try {
+          window.open(gameOverVideoUrl, "_blank", "noopener,noreferrer");
+        } catch (error) {
+          console.warn("The game-over video could not be opened automatically.", error);
+        }
+      }
+    }
+
+    function movePlayer(deltaTime) {
+      const direction = Number(keys.right) - Number(keys.left);
+      player.x += direction * player.speed * deltaTime;
+      player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
+
+      player.fireCooldown -= deltaTime;
+      const fireInterval = game.bossBattle ? 0.1 : 0.35;
+      if (keys.fire && player.fireCooldown <= 0) {
+        playerBullets.push({
+          x: player.x + player.width / 2 - 2,
+          y: player.y - 14,
+          width: 4,
+          height: 14,
+          speed: 520
+        });
+        playLaserSound();
+        player.fireCooldown = fireInterval;
+      }
+    }
+
+    function moveFormation(deltaTime) {
+      const activeInvaders = livingInvaders();
+      if (activeInvaders.length === 0) {
+        endGame(true);
+        return;
+      }
+
+      let leftEdge = Infinity;
+      let rightEdge = -Infinity;
+      for (const invader of activeInvaders) {
+        leftEdge = Math.min(leftEdge, invader.baseX + formation.offsetX);
+        rightEdge = Math.max(rightEdge, invader.baseX + formation.offsetX + invader.width);
+      }
+
+      const speedMultiplier = game.bossBattle ? 2 : 1;
+      const nextOffsetX = formation.offsetX +
+        formation.direction * formation.speed * speedMultiplier * deltaTime;
+      const horizontalStep = nextOffsetX - formation.offsetX;
+
+      if (leftEdge + horizontalStep <= 0) {
+        const leftmostBase = Math.min(...activeInvaders.map((invader) => invader.baseX));
+        formation.offsetX = -leftmostBase;
+        formation.direction = 1;
+        formation.offsetY += formation.dropDistance;
+      } else if (rightEdge + horizontalStep >= canvas.width) {
+        const rightmostBase = Math.max(...activeInvaders.map((invader) => invader.baseX + invader.width));
+        formation.offsetX = canvas.width - rightmostBase;
+        formation.direction = -1;
+        formation.offsetY += formation.dropDistance;
+      } else {
+        formation.offsetX = nextOffsetX;
+      }
+
+      const reachedPlayer = activeInvaders.some(
+        (invader) => invader.baseY + formation.offsetY + invader.height >= player.y
+      );
+      if (reachedPlayer) {
+        endGame(false);
+      }
+    }
+
+    function fireEnemyBullet() {
+      const bottomInvaderByColumn = new Map();
+      for (const invader of livingInvaders()) {
+        const current = bottomInvaderByColumn.get(invader.column);
+        if (!current || invader.row > current.row) {
+          bottomInvaderByColumn.set(invader.column, invader);
+        }
+      }
+
+      const shooters = Array.from(bottomInvaderByColumn.values());
+      if (shooters.length === 0) {
+        return;
+      }
+
+      const shooter = shooters[Math.floor(Math.random() * shooters.length)];
+      enemyBullets.push({
+        x: shooter.baseX + formation.offsetX + shooter.width / 2 - 2,
+        y: shooter.baseY + formation.offsetY + shooter.height,
+        width: 4,
+        height: 12,
+        speed: 220
+      });
+      playEnemyShotSound();
+    }
+
+    function overlaps(first, second) {
+      return first.x < second.x + second.width &&
+        first.x + first.width > second.x &&
+        first.y < second.y + second.height &&
+        first.y + first.height > second.y;
+    }
+
+    function erodeBunker(bunker, hitRow, hitColumn) {
+      for (let row = hitRow - 1; row <= hitRow + 1; row += 1) {
+        for (let column = hitColumn - 1; column <= hitColumn + 1; column += 1) {
+          if (
+            row >= 0 &&
+            row < bunker.cells.length &&
+            column >= 0 &&
+            column < bunker.cells[row].length
+          ) {
+            bunker.cells[row][column] = false;
+          }
+        }
+      }
+    }
+
+    function collideWithBunker(bullet, previousY) {
+      const sampleStep = bunkerCellSize / 2;
+      const startCenterY = previousY + bullet.height / 2;
+      const endCenterY = bullet.y + bullet.height / 2;
+      const sampleCount = Math.max(1, Math.ceil(Math.abs(endCenterY - startCenterY) / sampleStep));
+
+      for (const bunker of bunkers) {
+        const firstColumn = Math.floor((bullet.x - bunker.x) / bunker.cellSize);
+        const lastColumn = Math.floor((bullet.x + bullet.width - 0.01 - bunker.x) / bunker.cellSize);
+        if (lastColumn < 0 || firstColumn >= bunker.cells[0].length) {
+          continue;
+        }
+
+        for (let sample = 0; sample <= sampleCount; sample += 1) {
+          const sampleY = startCenterY + (endCenterY - startCenterY) * sample / sampleCount;
+          const firstRow = Math.floor((sampleY - bullet.height / 2 - bunker.y) / bunker.cellSize);
+          const lastRow = Math.floor(
+            (sampleY + bullet.height / 2 - 0.01 - bunker.y) / bunker.cellSize
+          );
+          for (let row = firstRow; row <= lastRow; row += 1) {
+            if (row < 0 || row >= bunker.cells.length) {
+              continue;
+            }
+            for (
+              let column = Math.max(0, firstColumn);
+              column <= Math.min(bunker.cells[row].length - 1, lastColumn);
+              column += 1
+            ) {
+              if (bunker.cells[row][column]) {
+                erodeBunker(bunker, row, column);
+                playImpactSound();
+                return true;
+              }
+            }
+          }
+        }
+      }
+
+      return false;
+    }
+
+    function updateBullets(deltaTime) {
+      for (let bulletIndex = playerBullets.length - 1; bulletIndex >= 0; bulletIndex -= 1) {
+        const bullet = playerBullets[bulletIndex];
+        const previousY = bullet.y;
+        bullet.y -= bullet.speed * deltaTime;
+        if (collideWithBunker(bullet, previousY)) {
+          playerBullets.splice(bulletIndex, 1);
+          continue;
+        }
+        if (bullet.y + bullet.height < 0) {
+          playerBullets.splice(bulletIndex, 1);
+          continue;
+        }
+
+        const hit = invaders.find((invader) => {
+          if (!invader.alive) {
+            return false;
+          }
+          return overlaps(bullet, {
+            x: invader.baseX + formation.offsetX,
+            y: invader.baseY + formation.offsetY,
+            width: invader.width,
+            height: invader.height
+          });
+        });
+
+        if (hit) {
+          hit.alive = false;
+          game.score += spriteTypes[hit.type].score;
+          game.destroyedInvaders += 1;
+          playerBullets.splice(bulletIndex, 1);
+          playExplosionSound();
+          if (game.destroyedInvaders === game.bossTriggerKills) {
+            startBossBattle();
+          }
+        }
+      }
+
+      for (let bulletIndex = enemyBullets.length - 1; bulletIndex >= 0; bulletIndex -= 1) {
+        const bullet = enemyBullets[bulletIndex];
+        const previousY = bullet.y;
+        bullet.y += bullet.speed * deltaTime;
+        if (collideWithBunker(bullet, previousY)) {
+          enemyBullets.splice(bulletIndex, 1);
+          continue;
+        }
+        if (bullet.y > canvas.height) {
+          enemyBullets.splice(bulletIndex, 1);
+          continue;
+        }
+
+        if (overlaps(bullet, player)) {
+          enemyBullets.splice(bulletIndex, 1);
+          if (game.time >= player.invulnerableUntil) {
+            game.lives -= 1;
+            playExplosionSound();
+            if (game.lives <= 0) {
+              endGame(false);
+            } else {
+              player.x = (canvas.width - player.width) / 2;
+              player.invulnerableUntil = game.time + 1.25;
+            }
+          }
+        }
+      }
+    }
+
+    function update(deltaTime) {
+      game.time += deltaTime;
+      if (game.gameOver || game.victory) {
+        return;
+      }
+
+      movePlayer(deltaTime);
+      moveFormation(deltaTime);
+      if (game.gameOver || game.victory) {
+        return;
+      }
+
+      game.enemyFireCooldown -= deltaTime;
+      const enemyFireInterval = game.bossBattle ? 0.3 : 1.5;
+      if (game.enemyFireCooldown <= 0) {
+        fireEnemyBullet();
+        game.enemyFireCooldown = enemyFireInterval;
+      }
+
+      updateBullets(deltaTime);
+      if (livingInvaders().length === 0) {
+        endGame(true);
+      }
+    }
+
+    function drawPlayer() {
+      if (game.time < player.invulnerableUntil && Math.floor(game.time * 12) % 2 === 0) {
+        return;
+      }
+
+      context.fillStyle = "#39ff14";
+      context.beginPath();
+      context.moveTo(player.x + player.width / 2, player.y);
+      context.lineTo(player.x + player.width, player.y + player.height);
+      context.lineTo(player.x, player.y + player.height);
+      context.closePath();
+      context.fill();
+    }
+
+    function drawInvaders() {
+      const frameIndex = Math.floor(game.time / 0.35) % 2;
+      for (const invader of invaders) {
+        if (!invader.alive) {
+          continue;
+        }
+
+        const sprite = spriteTypes[invader.type];
+        const frame = sprite.frames[frameIndex];
+        context.fillStyle = sprite.color;
+        for (let row = 0; row < frame.length; row += 1) {
+          for (let column = 0; column < frame[row].length; column += 1) {
+            if (frame[row][column] === "1") {
+              context.fillRect(
+                invader.baseX + formation.offsetX + column * formation.spritePixelSize,
+                invader.baseY + formation.offsetY + row * formation.spritePixelSize,
+                formation.spritePixelSize,
+                formation.spritePixelSize
+              );
+            }
+          }
+        }
+      }
+    }
+
+    function drawBullets() {
+      context.save();
+      context.shadowColor = "#8ffcff";
+      context.shadowBlur = 10;
+      context.fillStyle = "#f4ffff";
+      for (const bullet of playerBullets) {
+        context.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+      }
+      context.restore();
+
+      context.fillStyle = "#ff557a";
+      for (const bullet of enemyBullets) {
+        context.fillRect(bullet.x, bullet.y, bullet.width, bullet.height / 2);
+        context.fillRect(
+          bullet.x + 1,
+          bullet.y + bullet.height / 2,
+          bullet.width - 2,
+          bullet.height / 2
+        );
+      }
+    }
+
+    function drawBunkers() {
+      context.fillStyle = "#39ff14";
+      for (const bunker of bunkers) {
+        for (let row = 0; row < bunker.cells.length; row += 1) {
+          for (let column = 0; column < bunker.cells[row].length; column += 1) {
+            if (bunker.cells[row][column]) {
+              context.fillRect(
+                bunker.x + column * bunker.cellSize,
+                bunker.y + row * bunker.cellSize,
+                bunker.cellSize,
+                bunker.cellSize
+              );
+            }
+          }
+        }
+      }
+    }
+
+    function drawHud() {
+      context.fillStyle = "#ffffff";
+      context.font = "20px monospace";
+      context.textBaseline = "top";
+      context.textAlign = "left";
+      context.fillText(`SCORE ${String(game.score).padStart(5, "0")}`, 22, 18);
+      context.fillText("LIVES", canvas.width - 142, 18);
+
+      for (let life = 0; life < game.lives; life += 1) {
+        const x = canvas.width - 78 + life * 20;
+        context.fillStyle = "#39ff14";
+        context.beginPath();
+        context.moveTo(x + 6, 18);
+        context.lineTo(x + 12, 28);
+        context.lineTo(x, 28);
+        context.closePath();
+        context.fill();
+      }
+    }
+
+    function drawBossAlert() {
+      if (!game.bossBattle || game.time >= game.bossAlertUntil || Math.floor(game.time * 8) % 2 === 1) {
+        return;
+      }
+
+      context.save();
+      context.fillStyle = "rgba(0, 0, 0, 0.72)";
+      context.fillRect(0, canvas.height / 2 - 42, canvas.width, 84);
+      context.fillStyle = "#ff2020";
+      context.font = "bold 38px monospace";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.shadowColor = "#ff0000";
+      context.shadowBlur = 18;
+      context.fillText("!! BOSS BATTLE !!", canvas.width / 2, canvas.height / 2);
+      context.restore();
+    }
+
+    function drawEndMessage() {
+      if (!game.gameOver && !game.victory) {
+        return;
+      }
+
+      context.fillStyle = "rgba(0, 0, 0, 0.78)";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = game.victory ? "#39ff14" : "#ff2020";
+      context.font = "bold 42px monospace";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(game.victory ? "YOU WIN!" : "GAME OVER", canvas.width / 2, canvas.height / 2);
+      context.fillStyle = "#ffffff";
+      context.font = "20px monospace";
+      context.fillText(
+        `FINAL SCORE ${String(game.score).padStart(5, "0")}`,
+        canvas.width / 2,
+        canvas.height / 2 + 42
+      );
+    }
+
+    function draw() {
+      context.fillStyle = "#000000";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      drawHud();
+      drawInvaders();
+      drawBunkers();
+      drawBullets();
+      drawPlayer();
+      drawBossAlert();
+      drawEndMessage();
+    }
+
+    function handleKey(event, isPressed) {
+      if (event.code === "ArrowLeft") {
+        keys.left = isPressed;
+        event.preventDefault();
+      } else if (event.code === "ArrowRight") {
+        keys.right = isPressed;
+        event.preventDefault();
+      } else if (event.code === "Space") {
+        keys.fire = isPressed;
+        event.preventDefault();
+      }
+    }
+
+    window.addEventListener("keydown", (event) => {
+      if (event.code === "ArrowLeft" || event.code === "ArrowRight" || event.code === "Space") {
+        getAudioContext();
+      }
+      handleKey(event, true);
+    });
+    window.addEventListener("keyup", (event) => handleKey(event, false));
+    window.addEventListener("blur", () => {
+      keys.left = false;
+      keys.right = false;
+      keys.fire = false;
+    });
+
+    let previousFrameTime = null;
+
+    function gameLoop(timestamp) {
+      const deltaTime = previousFrameTime === null
+        ? 0
+        : Math.min((timestamp - previousFrameTime) / 1000, 0.05);
+      previousFrameTime = timestamp;
+
+      update(deltaTime);
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    draw();
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
