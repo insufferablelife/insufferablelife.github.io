@@ -39,49 +39,22 @@
       margin-left: 0.5rem;
     }
 
-    .game-over-link {
-      position: fixed;
-      top: calc(50% + 3rem);
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1;
-      padding: 0.65rem 1rem;
-      border: 1px solid #ffffff;
-      border-radius: 0.25rem;
-      background: #171717;
-      color: #ffffff;
-      font: 16px system-ui, sans-serif;
-      text-decoration: none;
-    }
-
-    .game-over-link:hover,
-    .game-over-link:focus-visible {
-      background: #303030;
-    }
   </style>
 </head>
 <body>
   <main>
-    <canvas id="game" width="800" height="600" aria-label="Space Invaders game. Use the left and right arrow keys to move and hold Space to fire.">
+    <canvas id="game" width="800" height="600" aria-label="Space Invaders game. Use left and right arrows to move, up and down during the boss fight, and hold Space to fire.">
       Your browser does not support the HTML canvas element.
     </canvas>
     <div id="audioStatus" class="audio-status" role="status" hidden>
       <span></span>
-      <button id="retryAudio" type="button" hidden>Retry Boss Music</button>
+      <button id="retryAudio" type="button" hidden>Retry Music</button>
     </div>
-    <a
-      id="gameOverVideoLink"
-      class="game-over-link"
-      href="https://youtu.be/dQw4w9WgXcQ"
-      target="_blank"
-      rel="noopener noreferrer"
-      hidden
-    >Open game-over video</a>
   </main>
 
   <audio
     id="bossMusic"
-    src="https://dn720302.ca.archive.org/0/items/07-one-last-trial/crosscode_ost_mp3/Deniz%20Akbulut%20-%20CrossCode%20%28Original%20Game%20Soundtrack%29/Deniz%20Akbulut%20-%20CrossCode%20%28Original%20Game%20Soundtrack%29%20-%2059%20Shizuka.mp3"
+    src="https://dn720302.ca.archive.org/0/items/07-one-last-trial/crosscode_ost_ex_flac/02-Boss%20Rush.mp3"
     preload="none"
     loop
   ></audio>
@@ -92,8 +65,30 @@
     const audioStatus = document.getElementById("audioStatus");
     const retryAudio = document.getElementById("retryAudio");
     const bossMusic = document.getElementById("bossMusic");
-    const gameOverVideoLink = document.getElementById("gameOverVideoLink");
-    const gameOverVideoUrl = "https://youtu.be/dQw4w9WgXcQ";
+    const rushMusicUrl = bossMusic.src;
+    const bigZimThemeUrl =
+      "https://dn721906.ca.archive.org/0/items/touhou-15-original-soundtrack/11.%20Pierrot%20of%20the%20Star-Spangled%20Banner.mp3";
+    const playerDeathSoundUrl = "https://www.myinstants.com/media/sounds/pichuun.mp3";
+    const gameOverSoundUrl =
+      "https://www.myinstants.com/media/sounds/dark-souls-you-died-sound-effect_hm5sYFG.mp3";
+    const bossDeathSoundUrl =
+      "https://www.myinstants.com/media/sounds/touhou-boss-death-sfx.mp3";
+    const victorySoundUrl = "https://www.myinstants.com/media/sounds/win31.mp3";
+    const rewindSoundUrl = "https://www.myinstants.com/media/sounds/rewind-fail-fx.mp3";
+    const playerBaseWidth = 42;
+    const playerBaseHeight = 28;
+    const konamiSequence = [
+      "ArrowUp",
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowLeft",
+      "ArrowRight",
+      "KeyB",
+      "KeyA"
+    ];
 
     const bunkerMask = [
       "000001111110000000",
@@ -189,19 +184,48 @@
       }
     };
 
+    const bigZimSprite = [
+      "00000011111111000000",
+      "00001111111111110000",
+      "00011111111111111000",
+      "00111121111121111100",
+      "01111111111111111110",
+      "11111111111111111111",
+      "11100111111111100111",
+      "11000111111111100011",
+      "00000111111111100000",
+      "00011111111111111100",
+      "00111111111111111100",
+      "01111111111111111110",
+      "11111111111111111111",
+      "11110111111111101111",
+      "11100111111111100111",
+      "00001100000000110000",
+      "00011000000000011000",
+      "00110000000000001100",
+      "01100000000000000110",
+      "11000000000000000011"
+    ];
+
     const player = {
-      x: (canvas.width - 42) / 2,
+      x: (canvas.width - playerBaseWidth) / 2,
       y: canvas.height - 54,
-      width: 42,
-      height: 28,
+      width: playerBaseWidth,
+      height: playerBaseHeight,
       speed: 360,
       fireCooldown: 0,
-      invulnerableUntil: 0
+      invulnerableUntil: 0,
+      flashUntil: 0,
+      flashStartedAt: 0,
+      respawning: false,
+      respawnAt: 0
     };
 
     const keys = {
       left: false,
       right: false,
+      up: false,
+      down: false,
       fire: false
     };
 
@@ -250,13 +274,28 @@
       score: 0,
       lives: 3,
       destroyedInvaders: 0,
-      bossTriggerKills: 5,
       time: 0,
       enemyFireCooldown: 1.5,
-      bossBattle: false,
+      phase: "standard",
+      rushAlertUntil: 0,
+      intermissionUntil: 0,
       bossAlertUntil: 0,
       gameOver: false,
-      victory: false
+      victory: false,
+      victoryPending: false,
+      devMode: false
+    };
+
+    const boss = {
+      x: 0,
+      y: 82,
+      width: 200,
+      height: 200,
+      health: 420,
+      maxHealth: 420,
+      startedAt: 0,
+      pattern: 0,
+      attackCooldown: 0
     };
 
     function livingInvaders() {
@@ -267,6 +306,8 @@
     let masterGain = null;
     let noiseBuffer = null;
     let soundErrorReported = false;
+    let konamiIndex = 0;
+    const activeAudioCues = new Set();
 
     function reportSoundError(error) {
       if (soundErrorReported) {
@@ -392,81 +433,235 @@
       playNoise(audio, startTime, 0.09, 0.1, 2600, 420);
     }
 
-    function playGameOverSound() {
-      const audio = getAudioContext();
-      if (!audio) {
-        return;
-      }
-
-      const startTime = audio.currentTime;
-      playTone(audio, "square", 520, 390, startTime, 0.18, 0.12);
-      playTone(audio, "square", 390, 260, startTime + 0.2, 0.18, 0.12);
-      playTone(audio, "triangle", 260, 70, startTime + 0.42, 0.62, 0.18);
-      playNoise(audio, startTime + 0.42, 0.55, 0.15, 3200, 180);
-    }
+    let currentAudioUrl = rushMusicUrl;
 
     function reportAudioError(error) {
-      console.error("Boss music could not be played.", error);
+      console.error("Game audio could not be played.", error);
       audioStatus.querySelector("span").textContent =
-        "Boss music could not be played. Check your connection or audio permissions.";
+        "Game audio could not be played. Check your connection or audio permissions.";
       audioStatus.hidden = false;
       retryAudio.hidden = false;
     }
 
-    function playBossMusic() {
-      if (!game.bossBattle || game.gameOver || game.victory) {
-        return;
-      }
+    function reportAudioCueError(error) {
+      console.error("A sound effect could not be played.", error);
+      audioStatus.querySelector("span").textContent =
+        "A sound effect could not be played. Check your connection or audio permissions.";
+      audioStatus.hidden = false;
+    }
 
+    function playGameAudio(url, loop) {
+      currentAudioUrl = url;
+      bossMusic.src = url;
+      bossMusic.loop = loop;
       bossMusic.play().then(() => {
         audioStatus.hidden = true;
         retryAudio.hidden = true;
       }).catch(reportAudioError);
     }
 
+    function retryGameAudio() {
+      if (game.gameOver) {
+        return;
+      }
+      playGameAudio(
+        currentAudioUrl,
+        !game.victory && (game.phase === "rush" || game.phase === "boss")
+      );
+    }
+
     bossMusic.addEventListener("error", () => {
-      reportAudioError(new Error("The audio file could not be loaded."));
+      reportAudioError(new Error("The game audio file could not be loaded."));
     });
 
-    retryAudio.addEventListener("click", playBossMusic);
+    retryAudio.addEventListener("click", retryGameAudio);
 
-    function startBossBattle() {
-      if (game.bossBattle) {
+    function playAudioCue(url) {
+      return new Promise((resolve) => {
+        let cue;
+        try {
+          cue = new Audio(url);
+        } catch (error) {
+          reportAudioCueError(error);
+          resolve();
+          return;
+        }
+        activeAudioCues.add(cue);
+        const finish = () => {
+          activeAudioCues.delete(cue);
+          resolve();
+        };
+        cue.addEventListener("ended", finish, { once: true });
+        cue.addEventListener("error", () => {
+          reportAudioCueError(new Error(`The audio file could not be loaded: ${url}`));
+          finish();
+        }, { once: true });
+        try {
+          cue.play().catch((error) => {
+            reportAudioCueError(error);
+            finish();
+          });
+        } catch (error) {
+          reportAudioCueError(error);
+          finish();
+        }
+      });
+    }
+
+    function stopAudioCues() {
+      for (const cue of activeAudioCues) {
+        cue.pause();
+        cue.currentTime = 0;
+      }
+      activeAudioCues.clear();
+    }
+
+    function startRushMode() {
+      if (game.phase !== "standard") {
         return;
       }
 
-      game.bossBattle = true;
+      game.phase = "rush";
+      game.rushAlertUntil = game.time + 3;
+      game.enemyFireCooldown = 0.3;
+      playGameAudio(rushMusicUrl, true);
+    }
+
+    function beginBossIntermission() {
+      if (game.phase !== "rush") {
+        return;
+      }
+
+      game.phase = "intermission";
+      game.intermissionUntil = game.time + 2;
+      bossMusic.pause();
+      playAudioCue(rewindSoundUrl);
+    }
+
+    function startBossBattle() {
+      game.phase = "boss";
       game.bossAlertUntil = game.time + 5;
-      game.enemyFireCooldown = Math.min(game.enemyFireCooldown, 0.3);
-      playBossMusic();
+      game.lives = 5;
+      game.enemyFireCooldown = 0;
+      boss.health = boss.maxHealth;
+      boss.startedAt = game.time;
+      boss.pattern = 0;
+      boss.attackCooldown = 0.5;
+      boss.x = (canvas.width - boss.width) / 2;
+      player.width = playerBaseWidth / 2.5;
+      player.height = playerBaseHeight / 2.5;
+      player.x = (canvas.width - player.width) / 2;
+      player.y = canvas.height - 54;
+      player.invulnerableUntil = Math.max(player.invulnerableUntil, game.time + 1.5);
+      enemyBullets.length = 0;
+      playerBullets.length = 0;
+      playGameAudio(bigZimThemeUrl, true);
     }
 
     function endGame(won) {
-      if (game.gameOver || game.victory) {
+      if (game.gameOver || game.victory || game.victoryPending) {
         return;
       }
 
-      game.gameOver = !won;
-      game.victory = won;
       bossMusic.pause();
-      if (!won) {
-        playGameOverSound();
-        gameOverVideoLink.hidden = false;
-        try {
-          window.open(gameOverVideoUrl, "_blank", "noopener,noreferrer");
-        } catch (error) {
-          console.warn("The game-over video could not be opened automatically.", error);
-        }
+      if (won) {
+        game.victoryPending = true;
+        playAudioCue(bossDeathSoundUrl).then(() => {
+          if (!game.victoryPending) {
+            return;
+          }
+          game.victoryPending = false;
+          game.victory = true;
+          playAudioCue(victorySoundUrl);
+        });
+      } else {
+        game.gameOver = true;
+        playAudioCue(gameOverSoundUrl);
       }
     }
 
+    function resetGame() {
+      bossMusic.pause();
+      stopAudioCues();
+      bossMusic.currentTime = 0;
+      bossMusic.src = rushMusicUrl;
+      bossMusic.loop = true;
+      currentAudioUrl = rushMusicUrl;
+      audioStatus.hidden = true;
+      retryAudio.hidden = true;
+      audioStatus.querySelector("span").textContent = "";
+
+      Object.assign(game, {
+        score: 0,
+        lives: 3,
+        destroyedInvaders: 0,
+        time: 0,
+        enemyFireCooldown: 1.5,
+        phase: "standard",
+        rushAlertUntil: 0,
+        intermissionUntil: 0,
+        bossAlertUntil: 0,
+        gameOver: false,
+        victory: false,
+        victoryPending: false,
+        devMode: false
+      });
+      Object.assign(player, {
+        x: (canvas.width - playerBaseWidth) / 2,
+        y: canvas.height - 54,
+        width: playerBaseWidth,
+        height: playerBaseHeight,
+        fireCooldown: 0,
+        invulnerableUntil: 0,
+        flashUntil: 0,
+        flashStartedAt: 0,
+        respawning: false,
+        respawnAt: 0
+      });
+      Object.assign(formation, {
+        offsetX: 0,
+        offsetY: 0,
+        direction: 1
+      });
+      Object.assign(boss, {
+        x: 0,
+        health: boss.maxHealth,
+        startedAt: 0,
+        pattern: 0,
+        attackCooldown: 0
+      });
+      for (const invader of invaders) {
+        invader.alive = true;
+      }
+      for (const bunker of bunkers) {
+        bunker.cells = bunkerMask.map((row) => Array.from(row, (cell) => cell === "1"));
+      }
+      playerBullets.length = 0;
+      enemyBullets.length = 0;
+      konamiIndex = 0;
+      keys.left = false;
+      keys.right = false;
+      keys.up = false;
+      keys.down = false;
+      keys.fire = false;
+    }
+
     function movePlayer(deltaTime) {
+      if (player.respawning) {
+        return;
+      }
       const direction = Number(keys.right) - Number(keys.left);
       player.x += direction * player.speed * deltaTime;
       player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
+      if (game.phase === "boss") {
+        const verticalDirection = Number(keys.down) - Number(keys.up);
+        player.y += verticalDirection * player.speed * deltaTime;
+        const minimumY = boss.y + boss.height + 20;
+        player.y = Math.max(minimumY, Math.min(canvas.height - player.height - 10, player.y));
+      }
 
       player.fireCooldown -= deltaTime;
-      const fireInterval = game.bossBattle ? 0.1 : 0.35;
+      const fireInterval = game.phase === "rush" || game.phase === "boss" ? 0.1 : 0.35;
       if (keys.fire && player.fireCooldown <= 0) {
         playerBullets.push({
           x: player.x + player.width / 2 - 2,
@@ -483,7 +678,6 @@
     function moveFormation(deltaTime) {
       const activeInvaders = livingInvaders();
       if (activeInvaders.length === 0) {
-        endGame(true);
         return;
       }
 
@@ -494,7 +688,7 @@
         rightEdge = Math.max(rightEdge, invader.baseX + formation.offsetX + invader.width);
       }
 
-      const speedMultiplier = game.bossBattle ? 2 : 1;
+      const speedMultiplier = game.phase === "rush" ? 2 : 1;
       const nextOffsetX = formation.offsetX +
         formation.direction * formation.speed * speedMultiplier * deltaTime;
       const horizontalStep = nextOffsetX - formation.offsetX;
@@ -544,6 +738,123 @@
         speed: 220
       });
       playEnemyShotSound();
+    }
+
+    function fireBossBullet(x, y, velocityX, velocityY, options) {
+      enemyBullets.push({
+        x,
+        y,
+        width: options.width || 8,
+        height: options.height || 8,
+        vx: velocityX,
+        vy: velocityY,
+        curveAmplitude: options.curveAmplitude || 0,
+        curveSpeed: options.curveSpeed || 0,
+        curvePhase: options.curvePhase || 0
+      });
+    }
+
+    function fireBossRings() {
+      const centerX = boss.x + boss.width / 2;
+      const centerY = boss.y + boss.height - 4;
+      const bulletCount = 32;
+      for (let ring = 0; ring < 3; ring += 1) {
+        for (let index = 0; index < bulletCount; index += 1) {
+          if (index >= 14 && index <= 17) {
+            continue;
+          }
+          const angle = Math.PI * 2 * index / bulletCount;
+          const speed = 105 + ring * 48;
+          fireBossBullet(
+            centerX - 4,
+            centerY,
+            Math.cos(angle) * speed,
+            Math.sin(angle) * speed,
+            { width: 8, height: 8 }
+          );
+        }
+      }
+    }
+
+    function fireBossCurtain() {
+      const columns = 10;
+      const spacing = canvas.width / (columns + 1);
+      for (let column = 1; column <= columns; column += 1) {
+        const x = column * spacing;
+        const phase = game.time * 2.2 + column * 0.75;
+        fireBossBullet(
+          x - 4,
+          boss.y + boss.height - 4,
+          0,
+          190,
+          {
+            width: 9,
+            height: 11,
+            curveAmplitude: 115,
+            curveSpeed: 2.4,
+            curvePhase: phase
+          }
+        );
+        fireBossBullet(
+          canvas.width - x - 4,
+          boss.y + boss.height - 4,
+          0,
+          190,
+          {
+            width: 9,
+            height: 11,
+            curveAmplitude: 115,
+            curveSpeed: 2.4,
+            curvePhase: phase + Math.PI
+          }
+        );
+      }
+    }
+
+    function fireBossStarSpray() {
+      const centerX = boss.x + boss.width / 2;
+      const centerY = boss.y + boss.height - 4;
+      const bulletCount = 36;
+      for (let index = 0; index < bulletCount; index += 1) {
+        if (index % 12 >= 8 && index % 12 <= 9) {
+          continue;
+        }
+        const angle = Math.PI * 2 * index / bulletCount + Math.PI / 36;
+        const speed = index % 2 === 0 ? 205 : 145;
+        fireBossBullet(
+          centerX - 5,
+          centerY,
+          Math.cos(angle) * speed,
+          Math.sin(angle) * speed,
+          { width: 10, height: 10 }
+        );
+      }
+    }
+
+    function updateBoss(deltaTime) {
+      const elapsed = game.time - boss.startedAt;
+      boss.x = (canvas.width - boss.width) / 2 + Math.sin(elapsed * 0.62) * 245;
+      const nextPattern = Math.floor(elapsed / 5) % 3;
+      if (nextPattern !== boss.pattern) {
+        boss.pattern = nextPattern;
+        boss.attackCooldown = 0.35;
+      }
+
+      boss.attackCooldown -= deltaTime;
+      if (boss.attackCooldown > 0) {
+        return;
+      }
+
+      if (boss.pattern === 0) {
+        fireBossRings();
+        boss.attackCooldown = 1.35;
+      } else if (boss.pattern === 1) {
+        fireBossCurtain();
+        boss.attackCooldown = 0.32;
+      } else {
+        fireBossStarSpray();
+        boss.attackCooldown = 0.95;
+      }
     }
 
     function overlaps(first, second) {
@@ -623,6 +934,26 @@
           continue;
         }
 
+        if (
+          game.phase === "boss" &&
+          overlaps(bullet, {
+            x: boss.x + 8,
+            y: boss.y + 8,
+            width: boss.width - 16,
+            height: boss.height - 16
+          })
+        ) {
+          boss.health = Math.max(0, boss.health - 4);
+          game.score += 10;
+          playerBullets.splice(bulletIndex, 1);
+          playImpactSound();
+          if (boss.health === 0) {
+            endGame(true);
+            return;
+          }
+          continue;
+        }
+
         const hit = invaders.find((invader) => {
           if (!invader.alive) {
             return false;
@@ -641,8 +972,8 @@
           game.destroyedInvaders += 1;
           playerBullets.splice(bulletIndex, 1);
           playExplosionSound();
-          if (game.destroyedInvaders === game.bossTriggerKills) {
-            startBossBattle();
+          if (game.phase === "standard" && game.destroyedInvaders === 5) {
+            startRushMode();
           }
         }
       }
@@ -650,26 +981,36 @@
       for (let bulletIndex = enemyBullets.length - 1; bulletIndex >= 0; bulletIndex -= 1) {
         const bullet = enemyBullets[bulletIndex];
         const previousY = bullet.y;
-        bullet.y += bullet.speed * deltaTime;
+        bullet.x += (bullet.vx || 0) * deltaTime;
+        if (bullet.curveAmplitude) {
+          bullet.x += Math.sin(game.time * bullet.curveSpeed + bullet.curvePhase) *
+            bullet.curveAmplitude * deltaTime;
+        }
+        bullet.y += (bullet.vy === undefined ? bullet.speed : bullet.vy) * deltaTime;
         if (collideWithBunker(bullet, previousY)) {
           enemyBullets.splice(bulletIndex, 1);
           continue;
         }
-        if (bullet.y > canvas.height) {
+        if (
+          bullet.y + bullet.height < 0 ||
+          bullet.y > canvas.height ||
+          bullet.x + bullet.width < 0 ||
+          bullet.x > canvas.width
+        ) {
           enemyBullets.splice(bulletIndex, 1);
           continue;
         }
 
-        if (overlaps(bullet, player)) {
+        if (!player.respawning && overlaps(bullet, player)) {
           enemyBullets.splice(bulletIndex, 1);
-          if (game.time >= player.invulnerableUntil) {
+          if (!game.devMode && game.time >= player.invulnerableUntil) {
             game.lives -= 1;
-            playExplosionSound();
+            playAudioCue(playerDeathSoundUrl);
             if (game.lives <= 0) {
               endGame(false);
             } else {
-              player.x = (canvas.width - player.width) / 2;
-              player.invulnerableUntil = game.time + 1.25;
+              player.respawning = true;
+              player.respawnAt = game.time + 1;
             }
           }
         }
@@ -678,35 +1019,69 @@
 
     function update(deltaTime) {
       game.time += deltaTime;
-      if (game.gameOver || game.victory) {
+      if (game.gameOver || game.victory || game.victoryPending) {
         return;
+      }
+
+      if (player.respawning && game.time >= player.respawnAt) {
+        player.respawning = false;
+        player.x = (canvas.width - player.width) / 2;
+        if (game.phase !== "boss") {
+          player.y = canvas.height - 54;
+        }
+        player.invulnerableUntil = game.time + 5;
+        player.flashStartedAt = game.time;
+        player.flashUntil = player.invulnerableUntil;
+      }
+
+      if (game.phase === "intermission") {
+        if (game.time >= game.intermissionUntil) {
+          startBossBattle();
+        } else {
+          return;
+        }
       }
 
       movePlayer(deltaTime);
-      moveFormation(deltaTime);
+      if (game.phase === "standard" || game.phase === "rush") {
+        moveFormation(deltaTime);
+      }
       if (game.gameOver || game.victory) {
         return;
       }
 
-      game.enemyFireCooldown -= deltaTime;
-      const enemyFireInterval = game.bossBattle ? 0.3 : 1.5;
-      if (game.enemyFireCooldown <= 0) {
-        fireEnemyBullet();
-        game.enemyFireCooldown = enemyFireInterval;
+      if (game.phase === "boss") {
+        updateBoss(deltaTime);
+      } else {
+        game.enemyFireCooldown -= deltaTime;
+        const enemyFireInterval = game.phase === "rush" ? 0.3 : 1.5;
+        if (game.enemyFireCooldown <= 0) {
+          fireEnemyBullet();
+          game.enemyFireCooldown = enemyFireInterval;
+        }
       }
 
       updateBullets(deltaTime);
-      if (livingInvaders().length === 0) {
-        endGame(true);
+      if (game.phase === "rush" && livingInvaders().length === 0) {
+        beginBossIntermission();
       }
     }
 
     function drawPlayer() {
-      if (game.time < player.invulnerableUntil && Math.floor(game.time * 12) % 2 === 0) {
+      if (player.respawning) {
         return;
       }
 
-      context.fillStyle = "#39ff14";
+      if (!game.devMode && game.time < player.flashUntil) {
+        const colors = ["#ff2020", "#2080ff", "#39ff14"];
+        const colorIndex = Math.floor((game.time - player.flashStartedAt) / 0.3) % colors.length;
+        context.fillStyle = colors[colorIndex];
+      } else if (!game.devMode && game.time < player.invulnerableUntil &&
+        Math.floor(game.time * 12) % 2 === 0) {
+        return;
+      } else {
+        context.fillStyle = "#39ff14";
+      }
       context.beginPath();
       context.moveTo(player.x + player.width / 2, player.y);
       context.lineTo(player.x + player.width, player.y + player.height);
@@ -750,8 +1125,10 @@
       }
       context.restore();
 
-      context.fillStyle = "#ff557a";
       for (const bullet of enemyBullets) {
+        context.fillStyle = bullet.vy === undefined ? "#ff557a" : "#ffb347";
+        context.shadowColor = bullet.vy === undefined ? "#ff557a" : "#ff8c2f";
+        context.shadowBlur = bullet.vy === undefined ? 0 : 7;
         context.fillRect(bullet.x, bullet.y, bullet.width, bullet.height / 2);
         context.fillRect(
           bullet.x + 1,
@@ -760,6 +1137,53 @@
           bullet.height / 2
         );
       }
+      context.shadowBlur = 0;
+    }
+
+    function drawBoss() {
+      if (game.phase !== "boss" && !game.victory) {
+        return;
+      }
+
+      const pixelSize = boss.width / bigZimSprite[0].length;
+      for (let row = 0; row < bigZimSprite.length; row += 1) {
+        for (let column = 0; column < bigZimSprite[row].length; column += 1) {
+          const pixel = bigZimSprite[row][column];
+          if (pixel === "0") {
+            continue;
+          }
+          context.fillStyle = pixel === "2" ? "#ff557a" : "#7dff5c";
+          context.fillRect(
+            boss.x + column * pixelSize,
+            boss.y + row * pixelSize,
+            pixelSize,
+            pixelSize
+          );
+        }
+      }
+    }
+
+    function drawBossHealth() {
+      if (game.phase !== "boss") {
+        return;
+      }
+
+      const barWidth = 360;
+      const barX = (canvas.width - barWidth) / 2;
+      context.textAlign = "center";
+      context.textBaseline = "top";
+      context.font = "bold 18px monospace";
+      context.fillStyle = "#39ff14";
+      context.shadowColor = "#39ff14";
+      context.shadowBlur = 10;
+      context.fillText("BIG ZIM", canvas.width / 2, 8);
+      context.shadowBlur = 0;
+      context.fillStyle = "#263326";
+      context.fillRect(barX, 32, barWidth, 14);
+      context.fillStyle = "#39ff14";
+      context.fillRect(barX, 32, barWidth * boss.health / boss.maxHealth, 14);
+      context.strokeStyle = "#b5ff9f";
+      context.strokeRect(barX, 32, barWidth, 14);
     }
 
     function drawBunkers() {
@@ -786,10 +1210,10 @@
       context.textBaseline = "top";
       context.textAlign = "left";
       context.fillText(`SCORE ${String(game.score).padStart(5, "0")}`, 22, 18);
-      context.fillText("LIVES", canvas.width - 142, 18);
+      context.fillText("LIVES", canvas.width - 180, 18);
 
       for (let life = 0; life < game.lives; life += 1) {
-        const x = canvas.width - 78 + life * 20;
+        const x = canvas.width - 102 + life * 18;
         context.fillStyle = "#39ff14";
         context.beginPath();
         context.moveTo(x + 6, 18);
@@ -798,10 +1222,17 @@
         context.closePath();
         context.fill();
       }
+
+      if (game.devMode) {
+        context.fillStyle = "#39ff14";
+        context.font = "bold 12px monospace";
+        context.fillText("Dev Mode Enabled", canvas.width - 180, 46);
+      }
     }
 
     function drawBossAlert() {
-      if (!game.bossBattle || game.time >= game.bossAlertUntil || Math.floor(game.time * 8) % 2 === 1) {
+      if (game.phase !== "boss" || game.time >= game.bossAlertUntil ||
+        Math.floor(game.time * 8) % 2 === 1) {
         return;
       }
 
@@ -815,6 +1246,25 @@
       context.shadowColor = "#ff0000";
       context.shadowBlur = 18;
       context.fillText("!! BOSS BATTLE !!", canvas.width / 2, canvas.height / 2);
+      context.restore();
+    }
+
+    function drawRushAlert() {
+      if (game.phase !== "rush" || game.time >= game.rushAlertUntil ||
+        Math.floor(game.time * 8) % 2 === 1) {
+        return;
+      }
+
+      context.save();
+      context.fillStyle = "rgba(0, 0, 0, 0.72)";
+      context.fillRect(0, canvas.height / 2 - 42, canvas.width, 84);
+      context.fillStyle = "#ffd700";
+      context.font = "bold 38px monospace";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.shadowColor = "#ffd700";
+      context.shadowBlur = 18;
+      context.fillText("!! RUSH MODE !!", canvas.width / 2, canvas.height / 2);
       context.restore();
     }
 
@@ -837,6 +1287,12 @@
         canvas.width / 2,
         canvas.height / 2 + 42
       );
+      context.font = "bold 20px monospace";
+      context.fillText(
+        game.gameOver ? "Press R to Restart" : "Press R to Play Again",
+        canvas.width / 2,
+        canvas.height / 2 + 82
+      );
     }
 
     function draw() {
@@ -844,19 +1300,31 @@
       context.fillRect(0, 0, canvas.width, canvas.height);
       drawHud();
       drawInvaders();
+      drawBoss();
+      drawBossHealth();
       drawBunkers();
       drawBullets();
       drawPlayer();
+      drawRushAlert();
       drawBossAlert();
       drawEndMessage();
     }
 
     function handleKey(event, isPressed) {
-      if (event.code === "ArrowLeft") {
+      if (isPressed && event.code === "KeyR" && (game.gameOver || game.victory)) {
+        resetGame();
+        event.preventDefault();
+      } else if (event.code === "ArrowLeft") {
         keys.left = isPressed;
         event.preventDefault();
       } else if (event.code === "ArrowRight") {
         keys.right = isPressed;
+        event.preventDefault();
+      } else if (event.code === "ArrowUp") {
+        keys.up = isPressed;
+        event.preventDefault();
+      } else if (event.code === "ArrowDown") {
+        keys.down = isPressed;
         event.preventDefault();
       } else if (event.code === "Space") {
         keys.fire = isPressed;
@@ -864,8 +1332,30 @@
       }
     }
 
+    function trackKonamiCode(event) {
+      if (event.repeat) {
+        return;
+      }
+      if (event.code === konamiSequence[konamiIndex]) {
+        konamiIndex += 1;
+        if (konamiIndex === konamiSequence.length) {
+          game.devMode = true;
+          konamiIndex = 0;
+        }
+      } else {
+        konamiIndex = event.code === konamiSequence[0] ? 1 : 0;
+      }
+    }
+
     window.addEventListener("keydown", (event) => {
-      if (event.code === "ArrowLeft" || event.code === "ArrowRight" || event.code === "Space") {
+      trackKonamiCode(event);
+      if (
+        event.code === "ArrowLeft" ||
+        event.code === "ArrowRight" ||
+        event.code === "ArrowUp" ||
+        event.code === "ArrowDown" ||
+        event.code === "Space"
+      ) {
         getAudioContext();
       }
       handleKey(event, true);
@@ -874,6 +1364,8 @@
     window.addEventListener("blur", () => {
       keys.left = false;
       keys.right = false;
+      keys.up = false;
+      keys.down = false;
       keys.fire = false;
     });
 
